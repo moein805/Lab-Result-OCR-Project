@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>خواننده جواب آزمایش با OCR</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tesseract.js CDN for client-side OCR -->
+    <script src='https://unpkg.com/tesseract.js@5.0.0/dist/tesseract.min.js'></script>
+    <style>
+        /* Custom styles for Inter font and general layout */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Align to top for better content flow */
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+        }
+        .file-upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 10px;
+            padding: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .file-upload-area:hover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .file-upload-area input[type="file"] {
+            display: none;
+        }
+        .image-preview {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin-top: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            display: none; /* Hidden by default */
+        }
+        .results-section {
+            margin-top: 30px;
+            text-align: right; /* Align text to right for RTL */
+        }
+        .results-section h2 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 20px;
+        }
+        .result-item {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column; /* Stack items vertically on small screens */
+            align-items: flex-start; /* Align items to start for RTL */
+            text-align: right; /* Align text to right for RTL */
+        }
+        .result-item strong {
+            color: #3b82f6;
+            font-size: 1.1rem;
+            margin-bottom: 5px; /* Spacing for stacked items */
+        }
+        .result-item span {
+            color: #4b5563;
+            font-size: 1rem;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none; /* Hidden by default */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Responsive adjustments */
+        @media (min-width: 640px) {
+            .result-item {
+                flex-direction: row; /* Row layout on larger screens */
+                justify-content: space-between; /* Space out items */
+                align-items: center; /* Center items vertically */
+            }
+            .result-item strong {
+                margin-bottom: 0; /* Remove bottom margin for row layout */
+                margin-left: 10px; /* Add left margin for RTL */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">خواننده جواب آزمایش با OCR</h1>
+        <p class="text-gray-600 mb-8">تصویر یا فایل PDF جواب آزمایش خود را آپلود کنید تا مقادیر کلیدی استخراج شوند.</p>
+
+        <div class="file-upload-area" id="fileUploadArea">
+            <input type="file" id="fileInput" accept="image/*, application/pdf">
+            <p class="text-gray-500 text-lg">برای آپلود کلیک کنید یا فایل را اینجا بکشید و رها کنید.</p>
+            <p class="text-sm text-gray-400 mt-2">فرمت‌های پشتیبانی شده: JPG, PNG, PDF</p>
+        </div>
+
+        <img id="imagePreview" class="image-preview mx-auto" src="#" alt="پیش‌نمایش تصویر">
+
+        <button id="processButton" class="mt-8 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-all duration-300 transform scale-100 hover:scale-105" style="display: none;">
+            پردازش تصویر
+        </button>
+
+        <div id="loadingSpinner" class="loading-spinner"></div>
+
+        <div id="resultsSection" class="results-section" style="display: none;">
+            <h2 class="mb-4">نتایج استخراج شده</h2>
+            <div id="extractedResults">
+                <!-- Extracted results will be displayed here -->
+            </div>
+            <button id="downloadJsonButton" class="mt-4 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-all duration-300" style="display: none;">
+                دانلود JSON
+            </button>
+        </div>
+
+        <!-- Custom Modal for messages (instead of alert) -->
+        <div id="messageModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white p-6 rounded-lg shadow-xl text-center max-w-sm w-full">
+                <p id="modalMessage" class="text-gray-800 text-lg mb-4"></p>
+                <button id="closeModalButton" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">باشه</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const fileUploadArea = document.getElementById('fileUploadArea');
+        const imagePreview = document.getElementById('imagePreview');
+        const processButton = document.getElementById('processButton');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultsSection = document.getElementById('resultsSection');
+        const extractedResultsDiv = document.getElementById('extractedResults');
+        const downloadJsonButton = document.getElementById('downloadJsonButton');
+        const messageModal = document.getElementById('messageModal');
+        const modalMessage = document.getElementById('modalMessage');
+        const closeModalButton = document.getElementById('closeModalButton');
+
+        let uploadedFile = null; // To store the file object
+
+        // Show custom modal message
+        function showMessage(message) {
+            modalMessage.textContent = message;
+            messageModal.classList.remove('hidden');
+            messageModal.classList.add('flex');
+        }
+
+        // Close custom modal message
+        closeModalButton.addEventListener('click', () => {
+            messageModal.classList.add('hidden');
+            messageModal.classList.remove('flex');
+        });
+
+        // Handle file selection via click
+        fileUploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Handle file drop
+        fileUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileUploadArea.classList.add('border-blue-600', 'bg-blue-50');
+        });
+
+        fileUploadArea.addEventListener('dragleave', () => {
+            fileUploadArea.classList.remove('border-blue-600', 'bg-blue-50');
+        });
+
+        fileUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileUploadArea.classList.remove('border-blue-600', 'bg-blue-50');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        // Handle file input change
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // Process the selected/dropped file
+        function handleFile(file) {
+            uploadedFile = file; // Store the file
+            resultsSection.style.display = 'none'; // Hide previous results
+            downloadJsonButton.style.display = 'none'; // Hide download button
+            extractedResultsDiv.innerHTML = ''; // Clear previous results
+
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block';
+                    processButton.style.display = 'block'; // Show process button for images
+                };
+                reader.readAsDataURL(file);
+            } else if (file.type === 'application/pdf') {
+                // Tesseract.js can directly process PDF files if they are images within the PDF
+                // For complex PDFs, a server-side solution might still be better.
+                imagePreview.style.display = 'none'; // No image preview for PDF
+                showMessage('فایل PDF آپلود شد. Tesseract.js تلاش می‌کند آن را پردازش کند. این ممکن است کمی طول بکشد.');
+                processButton.style.display = 'block'; // Show process button for PDF
+            } else {
+                showMessage('لطفاً یک فایل تصویری (JPG, PNG) یا PDF انتخاب کنید.');
+                imagePreview.style.display = 'none';
+                processButton.style.display = 'none';
+                uploadedFile = null;
+            }
+        }
+
+        // Function to parse raw OCR text into structured lab results
+        function parseLabResults(ocrText) {
+            const results = [];
+            const lines = ocrText.split('\n').filter(line => line.trim() !== '');
+
+            // Regular expressions to capture different patterns
+            // This is a simplified regex and might need extensive refinement for various lab formats
+            const testPattern = /(.*?)\s+([\d\.,]+)\s+([a-zA-Z\/%\*µ]+)\s+([\d\.-]+(?:\s*-\s*[\d\.-]+)?|[\d\.]+|<[\d\.]+|>[<\d\.]+|[A-Za-z\s]+)/;
+            const bloodGroupPattern = /(Blood Group|Rh Factor)\s*:\s*([A-Za-z0-9\+\-]+)/i;
+            const urineAnalysisPattern = /(Urine Analysis|Macroscopic)\s*(.*?)\s*(W\.B\.C\.|R\.B\.C\.|Epithelial Cells|Bacteria|Casts|Crystals|pH|Specific Gravity|Protein|Glucose|Ketones|Bilirubin|Urobilinogen|Nitrite|Leukocyte Esterase)\s*(.*?)$/i;
+
+
+            // Iterate through lines to find test results
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+
+                // Try to match standard test patterns
+                let match = line.match(testPattern);
+                if (match && match[1] && match[2] && match[3]) {
+                    results.push({
+                        test: match[1].trim(),
+                        result: match[2].trim(),
+                        unit: match[3].trim(),
+                        normal_range: match[4] ? match[4].trim() : ''
+                    });
+                    continue; // Move to next line
+                }
+
+                // Try to match blood group/Rh factor
+                match = line.match(bloodGroupPattern);
+                if (match && match[1] && match[2]) {
+                    results.push({
+                        test: match[1].trim(),
+                        result: match[2].trim(),
+                        unit: '',
+                        normal_range: ''
+                    });
+                    continue;
+                }
+
+                // Try to match Urine Analysis (more complex, might need specific handling)
+                // This is a very basic attempt and will likely need more robust logic
+                match = line.match(urineAnalysisPattern);
+                if (match && match[1] && match[3]) {
+                    results.push({
+                        test: match[1].trim() + (match[2] ? ' ' + match[2].trim() : ''),
+                        result: match[3].trim(),
+                        unit: '',
+                        normal_range: ''
+                    });
+                    continue;
+                }
+
+                // Fallback: If no specific pattern matches, try to extract general info
+                // This part is highly heuristic and might produce noisy data
+                const parts = line.split(/\s{2,}/); // Split by 2 or more spaces
+                if (parts.length >= 3) {
+                    // Heuristic: assume first part is test, second is result, third is unit
+                    // This is very weak and needs improvement
+                    const testName = parts[0].trim();
+                    const value = parts[1].trim();
+                    const unitOrRange = parts[2].trim();
+
+                    // Simple check if it looks like a number or range
+                    if (value.match(/[\d\.,]+/) && unitOrRange.match(/[a-zA-Z\/%\*µ]+|[\d\.-]+/)) {
+                         // Check if there's a fourth part for normal range
+                        let normalRange = '';
+                        if (parts.length >= 4) {
+                            normalRange = parts[3].trim();
+                        }
+                        results.push({
+                            test: testName,
+                            result: value,
+                            unit: unitOrRange.match(/[a-zA-Z\/%\*µ]+/) ? unitOrRange : '',
+                            normal_range: unitOrRange.match(/[\d\.-]+(?:\s*-\s*[\d\.-]+)?|[\d\.]+|<[\d\.]+|>[<\d\.]+|[A-Za-z\s]+/) ? unitOrRange : normalRange // If unitOrRange is a range, use it
+                        });
+                    }
+                }
+            }
+            return results;
+        }
+
+        // OCR processing using Tesseract.js
+        processButton.addEventListener('click', async () => {
+            if (!uploadedFile) {
+                showMessage('لطفاً ابتدا یک فایل را آپلود کنید.');
+                return;
+            }
+
+            processButton.style.display = 'none';
+            loadingSpinner.style.display = 'block';
+            resultsSection.style.display = 'none';
+            downloadJsonButton.style.display = 'none';
+            extractedResultsDiv.innerHTML = '';
+
+            try {
+                // Tesseract.js recognizes the image/PDF
+                const { data: { text } } = await Tesseract.recognize(
+                    uploadedFile,
+                    'eng+fas', // Use English and Farsi (Persian) languages
+                    {
+                        logger: m => {
+                            // You can log progress here if needed
+                            // console.log(m.status, m.progress);
+                        }
+                    }
+                );
+
+                // Parse the extracted text
+                const extractedData = parseLabResults(text);
+                displayResults(extractedData);
+
+            } catch (error) {
+                console.error('Error during OCR processing:', error);
+                showMessage('خطا در پردازش فایل با OCR: ' + error.message + '. لطفاً از کیفیت تصویر اطمینان حاصل کنید.');
+                processButton.style.display = 'block'; // Allow retry
+            } finally {
+                loadingSpinner.style.display = 'none';
+            }
+        });
+
+        // Display extracted results
+        function displayResults(data) {
+            extractedResultsDiv.innerHTML = ''; // Clear previous results
+            if (data && data.length > 0) {
+                data.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'result-item';
+                    div.innerHTML = `
+                        <strong>${item.test}:</strong>
+                        <span>${item.result} ${item.unit}</span>
+                        ${item.normal_range ? `<span class="text-gray-500 mr-auto"> (بازه نرمال: ${item.normal_range})</span>` : ''}
+                    `;
+                    extractedResultsDiv.appendChild(div);
+                });
+                resultsSection.style.display = 'block';
+                downloadJsonButton.style.display = 'block';
+            } else {
+                extractedResultsDiv.innerHTML = '<p class="text-gray-500">داده‌ای استخراج نشد. لطفاً از کیفیت تصویر اطمینان حاصل کنید یا فرمت دیگری را امتحان کنید.</p>';
+                resultsSection.style.display = 'block';
+            }
+        }
+
+        // Download results as JSON
+        downloadJsonButton.addEventListener('click', () => {
+            const data = [];
+            document.querySelectorAll('.result-item').forEach(itemDiv => {
+                const test = itemDiv.querySelector('strong').textContent.replace(':', '').trim();
+                const resultText = itemDiv.querySelector('span').textContent.trim();
+                const normalRangeElement = itemDiv.querySelector('.text-gray-500');
+                const normalRangeText = normalRangeElement ? normalRangeElement.textContent.replace('(بازه نرمال:', '').replace(')', '').trim() : '';
+
+                // Attempt to parse resultText into result and unit
+                let result = '';
+                let unit = '';
+                const parts = resultText.split(' ');
+                if (parts.length > 1) {
+                    result = parts[0];
+                    unit = parts.slice(1).join(' ');
+                } else {
+                    result = resultText;
+                }
+
+                data.push({
+                    test: test,
+                    result: result,
+                    unit: unit,
+                    normal_range: normalRangeText
+                });
+            });
+
+            const jsonString = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'lab_results.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
